@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocal Tune — OBS overlay</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  'use strict';
+
+  const q = new URLSearchParams(location.search);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const num = (v, fallback) => { const n = parseFloat(v); return Number.isFinite(n) ? n : fallback; };
+  const asColour = (v, fallback) => {
+    if (!v) return fallback;
+    if (v === 'white' || v === 'black' || v.startsWith('#') || v.startsWith('rgb') || v.startsWith('hsl')) return v;
+    if (/^[0-9a-f]{3,8}$/i.test(v)) return '#' + v;
+    return fallback;
+  };
+
+  const cfg = {
+    keyboard: q.get('keyboard') !== '0',
+    grid: q.get('grid') !== '0',
+    target: q.get('target') !== '0',
+    note: q.get('note') === '1',
+    demo: q.get('demo') === '1',
+    opacity: clamp(num(q.get('opacity'), 0.90), 0.15, 1),
+    history: clamp(num(q.get('history'), 7), 2, 20),
+    color: asColour(q.get('color'), '#ffffff'),
+    accent: asColour(q.get('accent'), '#8ef0c8'),
+    glow: clamp(num(q.get('glow'), 1), 0, 2),
+    caption: q.get('caption') || ''
+  };
+
+  const LOW = 36, HIGH = 84;      // C2 .. C6
+  const N = HIGH - LOW + 1;
+  const BLACK = new Set([1, 3, 6, 8, 10]);
+  const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = 1, H = 1, dpr = 1;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(1, window.innerWidth);
+    H = Math.max(1, window.innerHeight);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  let state = { key: 0, mask: 0x0fff, strength: 0.82 };
+  let points = [];
+  let lastT = 0;
+  let lastMessageAt = performance.now();
+  let haveLiveLink = false;
+
+  function noteName(midi) {
+    const r = Math.round(midi);
+    return NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1);
+  }
+
+  function ingest(payload) {
+    if (!payload || !Array.isArray(payload.pts)) return;
+    lastMessageAt = performance.now();
+    haveLiveLink = true;
+
+    for (const item of payload.pts) {
+      if (!Array.isArray(item) || item.length < 4) continue;
+      const t = +item[0];
+      if (!Number.isFinite(t)) continue;
+      if (points.length && t <= points[points.length - 1].t) continue;
+
+      const m = Number.isFinite(+item[1]) ? +item[1] : 0;
+      const tm = Number.isFinite(+item[2]) ? +item[2] : 0;
+      points.push({ t, m, tm, v: +item[3] > 0 });
+      lastT = t;
+    }
+
+    const cutoff = lastT - (cfg.history * 1000 + 4000);
+    if (points.length > 6000) points = points.slice(points.length - 6000);
+    if (points.length && points[0].t < cutoff) points = points.filter(p => p.t >= cutoff);
+  }
+
+  let events = null;
+  if (!cfg.demo) {
+    events = new EventSource('/events');
+    events.addEventListener('state', e => {
+      try {
+        const incoming = JSON.parse(e.data);
+        if (incoming && typeof incoming === 'object') state = Object.assign({}, state, incoming);
+      } catch (_) {}
+    });
+    events.addEventListener('reset', () => {
+      points = [];
+      lastT = 0;
+    });
+    events.addEventListener('pts', e => {
+      try { ingest(JSON.parse(e.data)); } catch (_) {}
+    });
+    events.onopen = () => { lastMessageAt = performance.now(); };
+  }
+
+  // ---- demo mode ------------------------------------------------------------
+  let demoLast = 0;
+  function demoStep(now) {
+    if (!demoLast) { demoLast = now - cfg.history * 1000 - 250; }
+    const tEnd = now;
+    while (demoLast < tEnd) {
+      const t = demoLast;
+      const time = t / 1000;
+      const contour = 60.2
+        + 5.1 * Math.sin(time * 0.92 + 0.35)
+        + 2.7 * Math.sin(time * 2.15 + 1.35)
+        + 0.26 * Math.sin(time * 7.6);
+      const voiced = Math.sin(time * 0.61 + 0.8) > -0.90;
+      const midi = voiced ? contour : 0;
+      const nearest = voiced ? Math.round(contour) : 0;
+      points.push({ t, m: midi, tm: nearest, v: voiced });
+      demoLast += 16;
+    }
+    if (points.length > 5000) points = points.slice(points.length - 5000);
+    lastT = points.length ? points[points.length - 1].t : now;
+    lastMessageAt = performance.now();
+  }
+
+  // ---- drawing --------------------------------------------------------------
+  function yForMidi(midi, laneH) {
+    const m = clamp(midi, LOW - 0.5, HIGH + 0.5);
+    return (HIGH - m + 0.5) * laneH;
+  }
+
+  function isInScale(midi) {
+    const pc = ((midi - state.key) % 12 + 12) % 12;
+    return ((state.mask >> pc) & 1) === 1;
+  }
+
+  function strokeSmoothPath(list, plotLeft, plotRight, laneH, newestT, historyMs) {
+    if (list.length < 2) return false;
+
+    const plotWidth = plotRight - plotLeft;
+    const mapX = t => plotRight - (newestT - t) / historyMs * plotWidth;
+
+    ctx.beginPath();
+
+    let prevX = 0, prevY = 0;
+    let havePrev = false;
+
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      const x = mapX(p.t);
+      const y = yForMidi(p.m, laneH);
+
+      if (!havePrev) {
+        ctx.moveTo(x, y);
+        prevX = x;
+        prevY = y;
+        havePrev = true;
+        continue;
+      }
+
+      if ((p.t - list[i - 1].t) > 150) {
+        ctx.lineTo(prevX, prevY);
+        ctx.moveTo(x, y);
+        prevX = x;
+        prevY = y;
+        continue;
+      }
+
+      const midX = (prevX + x) * 0.5;
+      const midY = (prevY + y) * 0.5;
+      ctx.quadraticCurveTo(prevX, prevY, midX, midY);
+      prevX = x;
+      prevY = y;
+    }
+
+    if (havePrev) ctx.lineTo(prevX, prevY);
+    return true;
+  }
+
+  function drawKeyboard(keysW, laneH) {
+    for (let midi = LOW; midi <= HIGH; midi++) {
+      const pc = ((midi % 12) + 12) % 12;
+      const black = BLACK.has(pc);
+      const y = (HIGH - midi) * laneH;
+
+      const g = ctx.createLinearGradient(0, y, 0, y + laneH);
+      g.addColorStop(0, 'rgba(247,248,251,0.97)');
+      g.addColorStop(1, 'rgba(218,222,230,0.97)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, y, keysW, laneH + 0.5);
+
+      ctx.fillStyle = 'rgba(8,9,13,0.30)';
+      ctx.fillRect(0, y, keysW, Math.max(1, laneH * 0.055));
+
+      if (black) {
+        const h = Math.max(2, laneH - 2);
+        const w = keysW * 0.63;
+        ctx.fillStyle = 'rgba(11,12,17,0.97)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(0, y + 1, w, h, Math.min(3, laneH * 0.2));
+        else ctx.rect(0, y + 1, w, h);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(235,238,244,0.94)';
+        ctx.fillRect(w, y + 1, keysW - w, Math.max(1, h));
+      }
+
+      if (pc === 0) {
+        ctx.fillStyle = 'rgba(20,22,29,0.52)';
+        ctx.font = `600 ${Math.max(7, Math.min(13, laneH * 0.66))}px "Segoe UI", sans-serif`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('C' + (Math.floor(midi / 12) - 1), keysW - 7, y + laneH * 0.5);
+      }
+    }
+
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(keysW, 0, 1, H);
+
+    const shade = ctx.createLinearGradient(keysW, 0, keysW + 18, 0);
+    shade.addColorStop(0, 'rgba(0,0,0,0.30)');
+    shade.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shade;
+    ctx.fillRect(keysW, 0, 18, H);
+  }
+
+  function draw() {
+    const now = performance.now();
+    if (cfg.demo) demoStep(now);
+
+    ctx.clearRect(0, 0, W, H);
+    if (q.get('bg')) {
+      ctx.fillStyle = asColour(q.get('bg'), 'rgba(0,0,0,0)');
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    const keysW = cfg.keyboard ? clamp(W * 0.135, 54, 190) : 0;
+    const plotLeft = keysW;
+    const plotRight = W - 3;
+    const plotWidth = Math.max(20, plotRight - plotLeft);
+    const laneH = H / N;
+
+    // Coloured note bands
+    for (let midi = LOW; midi <= HIGH; midi++) {
+      const pc = ((midi % 12) + 12) % 12;
+      const black = BLACK.has(pc);
+      const inScale = isInScale(midi);
+      const y = (HIGH - midi) * laneH;
+
+      const hue = pc * 30;
+      const sat = inScale ? 40 : 24;
+      let light = black ? (inScale ? 13 : 10) : (inScale ? 20 : 16);
+
+      const grad = ctx.createLinearGradient(0, y, 0, y + laneH);
+      grad.addColorStop(0, `hsla(${hue}, ${sat}%, ${light + 2.2}%, ${cfg.opacity})`);
+      grad.addColorStop(1, `hsla(${hue}, ${sat}%, ${Math.max(4, light - 1.5)}%, ${cfg.opacity})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(plotLeft, y, plotWidth + 3, laneH + 0.5);
+
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.fillRect(plotLeft, y, plotWidth + 3, Math.max(0.5, laneH * 0.04));
+    }
+
+    const historyMs = cfg.history * 1000;
+    const newestT = points.length
+      ? points[points.length - 1].t + clamp(now - lastMessageAt, 0, 180)
+      : now;
+
+    // Target lane glow
+    if (points.length) {
+      let lastVoiced = null;
+      for (let i = points.length - 1; i >= 0 && i > points.length - 600; i--) {
+        if (points[i].v) { lastVoiced = points[i]; break; }
+      }
+      if (lastVoiced && Number.isFinite(lastVoiced.tm) && lastVoiced.tm > 0) {
+        const y = yForMidi(lastVoiced.tm, laneH);
+        ctx.fillStyle = hexToRgba(cfg.accent, 0.06);
+        ctx.fillRect(plotLeft, y - laneH * 0.5, plotWidth + 3, laneH);
+      }
+    }
+
+    // Grid
+    if (cfg.grid) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.055)';
+      ctx.lineWidth = 1;
+      const first = Math.floor(newestT / 1000) * 1000;
+      const xFor = t => plotRight - (newestT - t) / historyMs * plotWidth;
+      for (let t = first; t >= newestT - historyMs; t -= 1000) {
+        const x = xFor(t);
+        if (x >= plotLeft && x <= plotRight) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, H);
+          ctx.stroke();
+        }
+      }
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      for (let midi = LOW; midi <= HIGH; midi++) {
+        if (midi % 12 === 0) {
+          const y = (HIGH - midi) * laneH;
+          ctx.beginPath();
+          ctx.moveTo(plotLeft, y);
+          ctx.lineTo(plotRight, y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    if (cfg.keyboard) drawKeyboard(keysW, laneH);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotLeft, 0, plotWidth + 3, H);
+    ctx.clip();
+
+    const visible = points.filter(p => p.t >= newestT - historyMs - 50);
+    const voiced = visible.filter(p => p.v);
+
+    // Target line
+    if (cfg.target && state.strength > 0.015 && voiced.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = hexToRgba(cfg.accent, 0.30);
+      ctx.lineWidth = Math.max(1, W / 1200);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.setLineDash([2, 6]);
+      const targetList = voiced
+        .filter(p => Number.isFinite(p.tm) && p.tm > 0)
+        .map(p => ({ t: p.t, m: p.tm }));
+      if (targetList.length > 1 && strokeSmoothPath(targetList, plotLeft, plotRight, laneH, newestT, historyMs)) {
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // Pitch line
+    if (voiced.length > 1) {
+      const pitchList = voiced.map(p => ({ t: p.t, m: p.m }));
+
+      ctx.save();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = cfg.color;
+      ctx.shadowColor = hexToRgba(cfg.color, 0.75);
+      ctx.shadowBlur = 22 * cfg.glow;
+      ctx.lineWidth = Math.max(3.0, Math.min(6.5, W * 0.003));
+      if (strokeSmoothPath(pitchList, plotLeft, plotRight, laneH, newestT, historyMs)) ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = cfg.color;
+      ctx.lineWidth = Math.max(1.7, Math.min(2.8, W * 0.0016));
+      if (strokeSmoothPath(pitchList, plotLeft, plotRight, laneH, newestT, historyMs)) ctx.stroke();
+      ctx.restore();
+
+      // Head glow
+      const head = voiced[voiced.length - 1];
+      if (head && (newestT - head.t) < 280) {
+        const hx = plotRight - (newestT - head.t) / historyMs * plotWidth;
+        const hy = yForMidi(head.m, laneH);
+        const radius = clamp(W * 0.012, 10, 24);
+
+        const glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, radius * 1.6);
+        glow.addColorStop(0, hexToRgba(cfg.accent, 0.35));
+        glow.addColorStop(0.45, hexToRgba(cfg.color, 0.20));
+        glow.addColorStop(1, hexToRgba(cfg.color, 0));
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(hx, hy, radius * 1.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = cfg.color;
+        ctx.beginPath();
+        ctx.arc(hx, hy, Math.max(2, radius * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+
+        if (cfg.note) {
+          const label = noteName(head.m);
+          ctx.font = `600 ${Math.max(11, Math.min(22, H * 0.022))}px "Segoe UI", sans-serif`;
+          const tw = ctx.measureText(label).width;
+          const padX = 10, padY = 5;
+          const boxW = tw + padX * 2;
+          const boxH = Math.max(22, H * 0.032);
+          const bx = Math.min(hx + radius * 0.9, plotRight - boxW - 4);
+          const by = clamp(hy - boxH * 1.4, 4, H - boxH - 4);
+
+          ctx.fillStyle = 'rgba(5,6,9,0.58)';
+          roundRectPath(bx, by, boxW, boxH, 8);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = cfg.color;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, bx + padX, by + boxH * 0.52);
+        }
+      }
+    }
+
+    ctx.restore();
+
+    if (cfg.caption) {
+      const captionSize = clamp(H * 0.045, 16, 46);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `600 ${captionSize}px "Segoe UI", "Helvetica Neue", sans-serif`;
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = cfg.color;
+      ctx.fillText(cfg.caption, W * 0.5, H - captionSize * 0.9);
+      ctx.restore();
+    }
+
+    if (cfg.demo) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.font = '600 10px "Segoe UI", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('PREVIEW', 12, 10);
+      ctx.restore();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  function roundRectPath(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(x, y, w, h, r);
+      return;
+    }
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function hexToRgba(colour, alpha) {
+    if (colour.startsWith('#')) {
+      let hex = colour.slice(1);
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      if (hex.length === 6) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return `rgba(${r},${g},${b},${alpha})`;
+      }
+      if (hex.length === 8) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return `rgba(${r},${g},${b},${alpha})`;
+      }
+    }
+    if (colour.startsWith('rgb')) return colour.replace(/rgba?\(([^)]+)\)/, (_, inside) => {
+      const parts = inside.split(',').slice(0, 3).map(s => s.trim());
+      return `rgba(${parts.join(',')},${alpha})`;
+    });
+    return colour;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

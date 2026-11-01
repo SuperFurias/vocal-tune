@@ -1,0 +1,41 @@
+# Build output
+/build/
+/out/
+/cmake-build-*/
+/CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+compile_commands.json
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+.vs/
+.vscode/
+.idea/
+*.code-workspace
+
+# Packaged app and local launcher
+/dist/
+/Vocal Tune.lnk
+
+# App runtime state
+/settings.json
+/audio-device.xml
+/Recordings/
+
+# Local test output
+/Temp/
+/Artifacts/
+
+# Compiled artifacts if copied out of build/
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.log
+Thumbs.db
+.DS_Store
