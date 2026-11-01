@@ -1,16 +1,20 @@
 # Vocal Tune
 
+![Vocal Tune audio file workbench](docs/screenshot.png)
+
 Real-time pitch correction with a live piano-roll pitch line and an OBS Browser Source overlay.
 
 Native Windows app (JUCE 8 + WASAPI). Fully self-contained: no installer, no runtime dependencies,
 settings and recordings stay next to the executable.
 
+## Download
+
+[Download the latest portable Windows build](https://github.com/SuperFurias/vocal-tune/releases/latest),
+unzip it into a writable folder, and run **Vocal Tune.exe**. No installer or runtime is required.
+
 ## Run the portable build
 
-The portable folder is generated locally under `dist\Vocal Tune`; compiled binaries are not stored
-in the source repository.
-
-1. Unzip / copy this folder somewhere writable (not inside Program Files).
+1. Unzip / copy the downloaded folder somewhere writable (not inside Program Files).
 2. Double-click **Vocal Tune.exe**.
 3. The window appears immediately and audio opens inside the app with a loading panel. The OBS
    overlay link is already available while the audio device initializes (the first open can take a
