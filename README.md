@@ -1,6 +1,6 @@
 # Vocal Tune
 
-![Vocal Tune audio file workbench](docs/screenshot.png)
+![Vocal Tune main window](docs/screenshot.png)
 
 Real-time pitch correction with a live piano-roll pitch line and an OBS Browser Source overlay.
 
