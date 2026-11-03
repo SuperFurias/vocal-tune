@@ -6,6 +6,7 @@
 #include "Core/Biquad.h"
 #include "Core/GranularShifter.h"
 #include "Core/PitchDetector.h"
+#include "Core/PitchStabilizer.h"
 #include "Recorder.h"
 
 #include <atomic>
@@ -131,6 +132,7 @@ private:
     juce::String lastError;
 
     autotune::PitchDetector detector;
+    autotune::PitchStabilizer pitchStabilizer;
     autotune::GranularShifter shifter;
     autotune::Biquad inputHighPass;
     autotune::Biquad outputHighPass;
@@ -157,8 +159,6 @@ private:
     std::atomic<uint32_t> referenceQueueRead { 0 };
     float referenceDecayCoefficient = 0.0f;
     float referenceAttackSamples = 1.0f;
-    std::vector<float> f0History { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-    int f0HistoryWrite = 0;
 
     float smoothedFrequency = 0.0f;
     float smoothedRatio = 1.0f;

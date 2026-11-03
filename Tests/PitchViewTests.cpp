@@ -53,7 +53,7 @@ int main()
     const float whiteHeight = piano.getHeight() / (float) whiteCount;
 
     expect (piano.getWidth() > 0.0f && piano.getHeight() > 0.0f, "keyboard bounds are empty");
-    expect (whiteCount == 43, "expected 43 white keys");
+    expect (whiteCount == 27, "expected 27 white keys");
 
     for (int index = 0; index < whiteCount; ++index)
     {
@@ -92,7 +92,7 @@ int main()
                 "black key click was intercepted by a white key at " + juce::String (midi));
     }
 
-    expect (blackCount == 30, "expected 30 black keys");
+    expect (blackCount == 18, "expected 18 black keys");
 
     const float middleY = piano.getCentreY();
     expect (PitchViewProbe::midiAt (view, { -1.0f, middleY }) == -1,

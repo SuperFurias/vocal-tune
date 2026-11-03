@@ -41,10 +41,10 @@ Settings are stored in `settings.json` and `audio-device.xml` beside the exe. Re
 - **IN GAIN** - microphone input level.
 - **MONITOR VOL** - master volume for the processed voice and the piano reference notes
   (0-200%; 100% is unity).
-- **PIANO KEYS** - the real-layout keyboard spans C1-C7 and labels every note. White keys use their
-  full key body; black keys are shorter and sit on top of the adjacent white key bands. Click or drag
-  across it to hear reference notes. They follow MONITOR VOL, play even when mic monitoring is muted,
-  and are not included in recordings.
+- **PIANO KEYS** - the real-layout keyboard spans E2-C6, the standard bass-to-soprano singing range,
+  and labels every note. White keys use their full key body; black keys are shorter and sit on top of
+  the adjacent white key bands. Click or drag across it to hear reference notes. They follow MONITOR
+  VOL, play even when mic monitoring is muted, and are not included in recordings.
 - **REC** - record the processed voice as a 24-bit mono WAV in `Recordings\`.
 - **TUNE FILE** - open the audio workbench: choose or drop a WAV/AIFF/FLAC/OGG/MP3, inspect its
   waveform, use the transport under it to **PLAY/PAUSE** and switch between **ORIGINAL** and **TUNED**,

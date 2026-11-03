@@ -1128,7 +1128,7 @@ void MainComponent::publishOverlayState()
          << ",\"strength\":" << juce::String (strength, 3)
          << ",\"transpose\":" << transpose
          << ",\"tuning\":" << juce::String (tuning, 1)
-         << ",\"fmin\":60,\"fmax\":1100}";
+         << ",\"fmin\":82.4,\"fmax\":1046.5}";
 
     overlay.publishState (json);
     overlayStateDirty = false;

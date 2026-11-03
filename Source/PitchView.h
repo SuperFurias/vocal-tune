@@ -49,8 +49,8 @@ private:
     int flashMidi = -1;
     double flashUntilMs = 0.0;
 
-    static constexpr int lowMidi = 24;   // C1
-    static constexpr int highMidi = 96;  // C7
+    static constexpr int lowMidi = 40;   // E2
+    static constexpr int highMidi = 84;  // C6
 
     friend class PitchViewProbe;
 };

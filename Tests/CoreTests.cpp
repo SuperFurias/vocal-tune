@@ -1,5 +1,6 @@
 #include "Core/NoteQuantizer.h"
 #include "Core/PitchDetector.h"
+#include "Core/PitchStabilizer.h"
 #include "Core/GranularShifter.h"
 
 #include <cmath>
@@ -73,6 +74,52 @@ namespace
         std::vector<float> silence ((size_t) window, 0.0f);
         const auto silentFrame = detector.analyseWindow (silence.data(), window);
         check (! silentFrame.voiced, "silence is unvoiced");
+    }
+
+    void testPitchStabilizer()
+    {
+        PitchStabilizer stabilizer;
+        double nowMs = 0.0;
+        float output = 0.0f;
+
+        for (int i = 0; i < 12; ++i)
+        {
+            output = stabilizer.process (220.0f, nowMs);
+            nowMs += 5.0;
+        }
+
+        check (std::abs (output - 220.0f) < 0.1f, "stabilizer locks onto 220 Hz");
+
+        for (int i = 0; i < 4; ++i)
+        {
+            output = stabilizer.process (440.0f, nowMs);
+            nowMs += 5.0;
+        }
+
+        check (std::abs (output - 220.0f) < 0.1f, "stabilizer rejects a short octave spike");
+
+        for (int i = 0; i < 4; ++i)
+        {
+            output = stabilizer.process (220.0f, nowMs);
+            nowMs += 5.0;
+        }
+
+        check (std::abs (output - 220.0f) < 0.1f, "stabilizer stays on 220 Hz after the spike");
+
+        for (int i = 0; i < 20; ++i)
+        {
+            output = stabilizer.process (440.0f, nowMs);
+            nowMs += 5.0;
+        }
+
+        check (std::abs (output - 440.0f) < 0.1f, "stabilizer accepts a sustained octave change");
+
+        nowMs += 60.0;
+        output = stabilizer.markUnvoiced (nowMs);
+        check (output == 0.0f, "stabilizer releases pitch after silence");
+
+        output = stabilizer.process (110.0f, nowMs);
+        check (std::abs (output - 110.0f) < 0.1f, "stabilizer starts a new note immediately");
     }
 
     void testQuantizer()
@@ -215,6 +262,7 @@ int main()
 {
     std::printf ("Auto-Tune DSP self-tests\n========================\n");
     testDetector();
+    testPitchStabilizer();
     testQuantizer();
     testShifter();
     testStreamingDetector();

@@ -258,8 +258,7 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     inputHighPass.reset();
     outputHighPass.reset();
 
-    f0History.assign (5, 0.0f);
-    f0HistoryWrite = 0;
+    pitchStabilizer.reset();
     smoothedFrequency = 0.0f;
     smoothedRatio = 1.0f;
     lastPeriodSamples = (float) (currentSampleRate / 220.0);
@@ -382,36 +381,30 @@ void AudioEngine::processChunk (const float* input, int outputOffset, int numSam
 
         if (strong)
         {
-            f0History[(size_t) f0HistoryWrite] = frame.frequency;
-            f0HistoryWrite = (f0HistoryWrite + 1) % (int) f0History.size();
+            smoothedFrequency = pitchStabilizer.process (frame.frequency, nowMs);
 
-            float sorted[5];
-            int count = 0;
-            for (float value : f0History)
-                if (value > 0.0f)
-                    sorted[count++] = value;
-
-            if (count > 0)
-            {
-                std::sort (sorted, sorted + count);
-                smoothedFrequency = sorted[count / 2];
-                lastPeriodSamples = (float) (currentSampleRate / std::max (1.0f, smoothedFrequency));
-            }
+            if (smoothedFrequency > 0.0f)
+                lastPeriodSamples = (float) (currentSampleRate / smoothedFrequency);
 
             currentConfidence = frame.confidence;
             voicedHoldUntilMs = nowMs + 32.0;
             currentVoiced = true;
         }
-        else if (nowMs > voicedHoldUntilMs)
+        else
         {
-            if (currentVoiced)
-            {
-                std::fill (f0History.begin(), f0History.end(), 0.0f);
-                smoothedFrequency = 0.0f;
-            }
+            pitchStabilizer.markUnvoiced (nowMs);
 
-            currentVoiced = false;
-            currentConfidence = 0.0f;
+            if (nowMs > voicedHoldUntilMs)
+            {
+                if (currentVoiced)
+                {
+                    pitchStabilizer.reset();
+                    smoothedFrequency = 0.0f;
+                }
+
+                currentVoiced = false;
+                currentConfidence = 0.0f;
+            }
         }
     }
 
