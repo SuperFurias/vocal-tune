@@ -18,15 +18,15 @@ unzip it into a writable folder, and run **Vocal Tune.exe**. No installer or run
 2. Double-click **Vocal Tune.exe**.
 3. The window appears immediately and audio opens inside the app with a loading panel. The OBS
    overlay link is already available while the audio device initializes (the first open can take a
-   few seconds). Choose the mic, output, device type and buffer in **SETUP**.
+   few seconds). Choose the mic, output, device type and buffer in **SETTINGS**.
 4. For the lowest latency, choose **Windows Audio (Low Latency Mode)** or **Exclusive Mode** and the
-   smallest stable buffer in SETUP. The choice is remembered next to the exe.
+   smallest stable buffer in SETTINGS. The choice is remembered next to the exe.
 5. Use headphones. Monitoring the mic through speakers can create feedback.
 6. If the input meter stays at `-inf`, check the Windows microphone privacy/level setting and lower
-   **NOISE GATE** in SETUP.
+   **NOISE GATE** in SETTINGS.
 
-Settings are stored in `settings.json` and `audio-device.xml` beside the exe. Recordings go to the
-`Recordings` folder beside the exe.
+Live and tune-file settings are stored independently in `settings.json`; audio device state is stored
+in `audio-device.xml` beside the exe. Recordings go to the `Recordings` folder beside the exe.
 
 ## Controls
 
@@ -42,15 +42,23 @@ Settings are stored in `settings.json` and `audio-device.xml` beside the exe. Re
 - **MONITOR VOL** - master volume for the processed voice and the piano reference notes
   (0-200%; 100% is unity).
 - **PIANO KEYS** - the real-layout keyboard spans E2-C6, the standard bass-to-soprano singing range,
-  and labels every note. White keys use their full key body; black keys are shorter and sit on top of
-  the adjacent white key bands. Click or drag across it to hear reference notes. They follow MONITOR
-  VOL, play even when mic monitoring is muted, and are not included in recordings.
+  and labels every note. Keyboard labels can use note names with octave numbers on the C markers,
+  scientific pitch notation, Helmholtz notation, solfège, MIDI note numbers, or singer-style names
+  such as "tenor high C" and "soprano high C". Black keys can be shown as sharps or flats. White keys
+  use their full key body; black keys are
+  shorter and sit on top of the adjacent white key bands. Click or drag across it to hear reference
+  notes. They follow MONITOR VOL, play even when mic monitoring is muted, and are not included in
+  recordings.
+- **PITCH DISPLAY** - shows the last 7 seconds with a seconds ruler at the bottom. The live pitch is the
+  bright line; the quantised target is the faint coloured line.
+- **SETTINGS** - open audio and display settings: device, buffer, A4 tuning, noise gate, keyboard label
+  style, sharps/flats and the target guide.
 - **REC** - record the processed voice as a 24-bit mono WAV in `Recordings\`.
 - **TUNE FILE** - open the audio workbench: choose or drop a WAV/AIFF/FLAC/OGG/MP3, inspect its
   waveform, use the transport under it to **PLAY/PAUSE** and switch between **ORIGINAL** and **TUNED**,
   choose a preset and adjust the tuning, then render a 24-bit WAV.
 - Presets: Natural (default) / Pop / Tight / Hard Tune / Clean; moving the pitch controls selects Custom.
-- Shortcuts: `M` monitor, `B` bypass, `R` record, `F1` audio setup, `F2` OBS link, `F3` tune file.
+- Shortcuts: `M` monitor, `B` bypass, `R` record, `F1` settings, `F2` OBS link, `F3` tune file.
 
 The interface scales with the window size, so maximizing gives larger labels, dials and keyboard keys.
 The layout compacts at small heights, so it stays readable down to roughly 980 x 780.
@@ -67,9 +75,9 @@ The layout compacts at small heights, so it stays readable down to roughly 980 x
    promptly.
 4. Adjust **PRESET, KEY, SCALE, TRANSPOSE, CORRECTION, RETUNE, HUMANIZE, TUNING A4 and INPUT GAIN**.
    PRESET loads the same Natural, Pop, Tight, Hard Tune and Clean shapes as the live panel; changing
-   correction, retune or humanize selects Custom. The preview updates while playing, and these
-   settings are also used for the export. **MATCH LIVE** copies the current live-panel values into the
-   workbench. These controls do not change the live engine.
+   correction, retune or humanize selects Custom. The preview and export use these values, and the
+   workbench remembers them separately from the live panel. **RESET** restores the tune-file defaults.
+   Nothing changed here affects the live engine.
 5. The destination is filled in automatically as `<source>-tuned.wav`; use **BROWSE** to choose another
    WAV destination.
 6. Click **EXPORT WAV**. In-panel progress appears for long files, and the same button switches to
@@ -115,14 +123,29 @@ Example:
 
 ## Latency
 
-The engine reports the device buffer and total latency in the bottom bar and in SETUP. At 441 samples
+The engine reports the device buffer and total latency in the bottom bar and in SETTINGS. At 441 samples
 / 44.1 kHz the total including the pitch engine is about 32 ms. Pick the smallest stable buffer in
-SETUP for lower latency.
+SETTINGS for lower latency.
 
 For the absolute lowest latency, choose **Windows Audio (Exclusive Mode)** as the device type in
-SETUP. Exclusive mode can prevent other applications (including OBS desktop audio capture) from using
+SETTINGS. Exclusive mode can prevent other applications (including OBS desktop audio capture) from using
 that device. **Windows Audio (Low Latency Mode)** is the recommended shared-mode choice. The selected
 device setup is saved in `audio-device.xml` beside the exe.
+
+## If the mic fades or pops
+
+A sustained note should not get quieter: Vocal Tune has no automatic gain control. If the level falls
+after a few seconds, or the audio crackles, Windows or the headset driver is usually processing the
+microphone:
+
+- **Windows microphone AGC/enhancements**: Control Panel > Sound > Recording > microphone > Properties,
+  then disable **Automatic Gain Control** and audio enhancements under Advanced/Enhancements.
+- **Windows communications ducking**: Control Panel > Sound > Communications > select **Do nothing**.
+- **Logitech G HUB / Realtek / other driver software**: disable mic AGC, noise suppression or voice
+  processing for the headset.
+- **Exclusive Mode** in SETTINGS bypasses Windows shared-mode processing, but blocks other apps from
+  using that device.
+- If the pops continue, raise the buffer size in SETTINGS and try another USB port without a hub.
 
 ## Build from source
 

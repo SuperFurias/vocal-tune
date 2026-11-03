@@ -16,11 +16,9 @@ namespace
         }
     }
 
-    juce::String keyName (int midi)
+    juce::String keyName (int midi, autotune::NoteLabelStyle style, bool useFlats)
     {
-        const int pitchClass = ((midi % 12) + 12) % 12;
-        return juce::String (autotune::getNoteName (pitchClass))
-               + juce::String (midi / 12 - 1);
+        return juce::String::fromUTF8 (autotune::formatNoteLabel (midi, style, useFlats).c_str());
     }
 }
 
@@ -35,6 +33,18 @@ PitchView::PitchView (AudioEngine& engineToUse)
 void PitchView::setShowTarget (bool shouldShow)
 {
     showTarget = shouldShow;
+    repaint();
+}
+
+void PitchView::setNoteLabelStyle (NoteLabelStyle style)
+{
+    noteLabelStyle = style;
+    repaint();
+}
+
+void PitchView::setUseFlats (bool shouldUseFlats)
+{
+    useFlats = shouldUseFlats;
     repaint();
 }
 
@@ -332,10 +342,9 @@ void PitchView::paint (juce::Graphics& g)
         // Grid
         {
             g.setColour (Theme::line.withAlpha (0.035f));
-            const double firstGrid = std::floor (newestTime / 1000.0) * 1000.0;
-            for (double t = firstGrid; t >= newestTime - historyMs; t -= 1000.0)
+            for (int second = 0; second <= (int) std::ceil (historySeconds); ++second)
             {
-                const float x = xForTime (t);
+                const float x = xForTime (newestTime - second * 1000.0);
                 if (x >= plotLeft && x <= plotRight)
                     g.drawVerticalLine ((int) std::lround (x), 0.0f, plotBottom);
             }
@@ -451,13 +460,15 @@ void PitchView::paint (juce::Graphics& g)
             {
                 const int pc = ((midi % 12) + 12) % 12;
 
+                const auto label = keyName (midi, noteLabelStyle, useFlats);
+
                 if (isBlackKey (pc))
                 {
                     const auto key = getBlackKeyBounds (midi, piano);
                     const auto labelArea = key.reduced (6.0f, 0.0f);
                     g.setFont (Theme::font (blackLabelFont));
                     g.setColour (Theme::text.withAlpha (0.92f));
-                    g.drawText (keyName (midi), labelArea.toNearestInt(),
+                    g.drawText (label, labelArea.toNearestInt(),
                                 juce::Justification::centredRight, false);
                 }
                 else
@@ -469,7 +480,7 @@ void PitchView::paint (juce::Graphics& g)
                                                                    key.getHeight());
                     g.setFont (Theme::font (whiteLabelFont, pc == 0));
                     g.setColour (juce::Colour (0xff1b1f27).withAlpha (pc == 0 ? 1.0f : 0.86f));
-                    g.drawText (keyName (midi), labelArea.toNearestInt(),
+                    g.drawText (label, labelArea.toNearestInt(),
                                 juce::Justification::centredRight, false);
                 }
             }
@@ -529,26 +540,13 @@ void PitchView::paint (juce::Graphics& g)
 
             if (showTarget && snapshot.strength > 0.02f)
             {
-                // A dotted guide shows the quantised target without the boxy
-                // staircase that a full line would draw.
-                double lastDotTime = 0.0;
-                for (const auto& point : points)
+                const auto targetPath = buildPath (true);
+
+                if (! targetPath.isEmpty())
                 {
-                    if (point.timeMs < newestTime - historyMs)
-                        continue;
-
-                    if (! point.voiced || point.targetMidi <= 0.0f)
-                        continue;
-
-                    if (point.timeMs - lastDotTime < 40.0)
-                        continue;
-
-                    lastDotTime = point.timeMs;
-
-                    const float x = xForTime (point.timeMs);
-                    const float y = yForMidi (point.targetMidi);
-                    g.setColour (Theme::accent.withAlpha (0.30f));
-                    g.fillEllipse (x - 1.3f, y - 1.3f, 2.6f, 2.6f);
+                    g.setColour (Theme::accent.withAlpha (0.24f));
+                    g.strokePath (targetPath, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved,
+                                                                    juce::PathStrokeType::rounded));
                 }
             }
 
@@ -587,6 +585,44 @@ void PitchView::paint (juce::Graphics& g)
                 g.fillEllipse (headX - 8.0f, headY - 8.0f, 16.0f, 16.0f);
                 g.setColour (juce::Colours::white);
                 g.fillEllipse (headX - 2.8f, headY - 2.8f, 5.6f, 5.6f);
+            }
+        }
+
+        // Time ruler
+        {
+            const float tickBottom = plotBottom - 1.0f;
+            const float tickTop = tickBottom - 5.0f;
+            const float labelTop = tickBottom - 17.0f;
+
+            g.setColour (Theme::stroke.withAlpha (0.45f));
+            g.drawHorizontalLine ((int) tickBottom, plotLeft, plotRight);
+
+            g.setFont (Theme::mono (10.0f));
+
+            for (int second = 0; second <= (int) historySeconds; ++second)
+            {
+                float x = xForTime (newestTime - second * 1000.0);
+                if (second == (int) historySeconds && x < plotLeft)
+                    x = plotLeft + 2.0f;
+
+                if (x < plotLeft - 1.0f || x > plotRight)
+                    continue;
+
+                g.setColour (Theme::text.withAlpha (second == 0 ? 0.90f : 0.62f));
+                g.drawVerticalLine ((int) std::lround (x), tickTop, tickBottom);
+
+                const auto label = second == 0 ? juce::String ("now")
+                                               : "-" + juce::String (second) + "s";
+                const float labelCentre = juce::jlimit (plotLeft + 20.0f, plotRight - 20.0f, x);
+
+                g.setColour (juce::Colours::black.withAlpha (0.42f));
+                g.drawText (label,
+                            juce::Rectangle<float> (labelCentre - 24.0f, labelTop + 1.0f, 48.0f, 12.0f),
+                            juce::Justification::centred, false);
+                g.setColour (Theme::text.withAlpha (second == 0 ? 0.98f : 0.75f));
+                g.drawText (label,
+                            juce::Rectangle<float> (labelCentre - 24.0f, labelTop, 48.0f, 12.0f),
+                            juce::Justification::centred, false);
             }
         }
 

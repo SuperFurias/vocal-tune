@@ -29,6 +29,10 @@ public:
     static double correction (const AudioFilePanel& panel) { return panel.correctionSlider.getValue(); }
     static double retune (const AudioFilePanel& panel) { return panel.retuneSlider.getValue(); }
     static double humanize (const AudioFilePanel& panel) { return panel.humanizeSlider.getValue(); }
+    static AudioFilePanel::InitialSettings currentSettings (const AudioFilePanel& panel)
+    {
+        return panel.getCurrentSettings();
+    }
 };
 
 namespace
@@ -194,6 +198,36 @@ int main()
     if (! resolvedOutput.existsAsFile() || resolvedOutput.getSize() == 0)
     {
         std::cerr << "FAIL: panel export did not create an output file\n";
+        return 1;
+    }
+
+    AudioFilePanel::InitialSettings independentSettings;
+    independentSettings.strength = 0.41f;
+    independentSettings.retuneMs = 77.0f;
+    independentSettings.humanize = 0.33f;
+    independentSettings.keyIndex = 3;
+    independentSettings.scaleIndex = 2;
+    independentSettings.transpose = -4;
+    independentSettings.tuningA4 = 432.0f;
+    independentSettings.gateDb = -70.0f;
+    independentSettings.inputGainDb = -6.5f;
+    independentSettings.presetName = "Custom";
+    independentSettings.prewarmPreviewAudio = false;
+    AudioFilePanel independentPanel (independentSettings);
+    const auto restored = AudioFilePanelProbe::currentSettings (independentPanel);
+
+    if (std::abs (restored.strength - 0.41f) > 0.001f
+        || std::abs (restored.retuneMs - 77.0f) > 0.01f
+        || std::abs (restored.humanize - 0.33f) > 0.001f
+        || restored.keyIndex != 3
+        || restored.scaleIndex != 2
+        || restored.transpose != -4
+        || std::abs (restored.tuningA4 - 432.0f) > 0.01f
+        || std::abs (restored.gateDb + 70.0f) > 0.01f
+        || std::abs (restored.inputGainDb + 6.5f) > 0.01f
+        || restored.presetName != "Custom")
+    {
+        std::cerr << "FAIL: tune-file settings were not independent\n";
         return 1;
     }
 

@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "AudioEngine.h"
+#include "Core/NoteNaming.h"
 #include <functional>
 #include <vector>
 
@@ -10,10 +11,14 @@ class PitchView : public juce::Component,
                   private juce::Timer
 {
 public:
+    using NoteLabelStyle = autotune::NoteLabelStyle;
+
     explicit PitchView (AudioEngine& engineToUse);
     ~PitchView() override = default;
 
     void setShowTarget (bool shouldShow);
+    void setNoteLabelStyle (NoteLabelStyle style);
+    void setUseFlats (bool shouldUseFlats);
     void setOnNoteClicked (std::function<void (int)> callback) { onNoteClicked = std::move (callback); }
     void paint (juce::Graphics&) override;
 
@@ -40,6 +45,8 @@ private:
     std::vector<TracePoint> points;
     AudioEngine::Snapshot snapshot;
     bool showTarget = true;
+    bool useFlats = false;
+    NoteLabelStyle noteLabelStyle = NoteLabelStyle::namesWithCOctaves;
     double historySeconds = 7.0;
     double lastFrameTimeMs = 0.0;
 

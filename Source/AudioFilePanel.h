@@ -31,6 +31,7 @@ public:
     explicit AudioFilePanel (InitialSettings settingsToUse);
     ~AudioFilePanel() override;
 
+    InitialSettings getCurrentSettings() const;
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -51,7 +52,8 @@ private:
     void chooseAudioFile();
     void chooseOutputFile();
     void loadFile (const juce::File& file);
-    void resetToLiveSettings();
+    void applySettings (const InitialSettings& settingsToApply);
+    void resetToDefaults();
     void applyPresetSelection();
     void setPresetToCustom();
     void startExport();
@@ -72,7 +74,7 @@ private:
     juce::String buildInfoText() const;
     void drawSectionHeading (juce::Graphics&, juce::Rectangle<int>, const juce::String&) const;
 
-    InitialSettings liveSettings;
+    InitialSettings initialSettings;
 
     juce::AudioFormatManager formatManager;
     juce::AudioThumbnailCache thumbnailCache { 8 };
@@ -117,7 +119,7 @@ private:
     juce::TextButton tunedButton { "TUNED" };
     juce::TextButton chooseButton { "CHOOSE AUDIO" };
     juce::TextButton browseOutputButton { "BROWSE" };
-    juce::TextButton matchLiveButton { "MATCH LIVE" };
+    juce::TextButton resetButton { "RESET" };
     juce::TextButton closeButton { "CLOSE" };
     juce::TextButton exportButton { "EXPORT WAV" };
 

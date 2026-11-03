@@ -1,3 +1,4 @@
+#include "Core/NoteNaming.h"
 #include "Core/NoteQuantizer.h"
 #include "Core/PitchDetector.h"
 #include "Core/PitchStabilizer.h"
@@ -74,6 +75,38 @@ namespace
         std::vector<float> silence ((size_t) window, 0.0f);
         const auto silentFrame = detector.analyseWindow (silence.data(), window);
         check (! silentFrame.voiced, "silence is unvoiced");
+    }
+
+    void testNoteNaming()
+    {
+        using Style = NoteLabelStyle;
+
+        check (formatNoteLabel (60, Style::namesWithCOctaves, false) == "C4",
+               "C octave markers name C4");
+        check (formatNoteLabel (62, Style::namesWithCOctaves, false) == "D",
+               "C octave markers leave D plain");
+        check (formatNoteLabel (61, Style::namesWithCOctaves, true) == std::string ("D\xE2\x99\xAD"),
+               "flat names use the flat symbol");
+        check (formatNoteLabel (61, Style::scientific, false)
+                   == std::string ("C\xE2\x99\xAF") + "4",
+               "scientific names include every octave");
+        check (formatNoteLabel (60, Style::helmholtz, false) == std::string ("c\xE2\x80\xB2"),
+               "Helmholtz names use lowercase prime notation");
+        check (formatNoteLabel (72, Style::helmholtz, false)
+                   == std::string ("c\xE2\x80\xB2\xE2\x80\xB2"),
+               "Helmholtz names add primes for higher octaves");
+        check (formatNoteLabel (60, Style::solfege, false) == "Do4",
+               "solfège names use fixed-do");
+        check (formatNoteLabel (61, Style::solfege, true) == std::string ("Re\xE2\x99\xAD"),
+               "solfège names follow the accidental choice");
+        check (formatNoteLabel (40, Style::midi, false) == "40",
+               "MIDI labels show note numbers");
+        check (formatNoteLabel (40, Style::singer, false) == "low E",
+               "singer labels use low E");
+        check (formatNoteLabel (72, Style::singer, false) == "tenor high C",
+               "singer labels use tenor high C");
+        check (formatNoteLabel (84, Style::singer, false) == "soprano high C",
+               "singer labels use soprano high C");
     }
 
     void testPitchStabilizer()
@@ -240,6 +273,50 @@ namespace
         check (relError < 0.005, unityMsg);
     }
 
+    void testSustainedShifter()
+    {
+        const double sr = 48000.0;
+        const int block = 128;
+        const int lookahead = 1022;
+        const int seconds = 10;
+        const int total = (int) (sr * seconds);
+        const double inputHz = 110.0;
+        auto input = makeSine (sr, inputHz, total + block, 0.35f);
+
+        for (float ratio : { 1.0f, 1.03f, 1.059f })
+        {
+            GranularShifter shifter;
+            shifter.prepare (sr, lookahead);
+
+            ShifterParams params;
+            params.periodSamples = (float) (sr / inputHz);
+            params.ratio = ratio;
+            params.voiced = true;
+
+            std::vector<float> output ((size_t) total, 0.0f);
+            for (int offset = 0; offset + block <= total; offset += block)
+            {
+                shifter.pushInput (input.data() + offset, block);
+                shifter.render (output.data() + offset, block, params);
+            }
+
+            double firstSecond = 0.0, lastSecond = 0.0;
+            for (int i = 48000; i < 96000; ++i)
+                firstSecond += (double) output[(size_t) i] * output[(size_t) i];
+            for (int i = (seconds - 1) * 48000; i < total; ++i)
+                lastSecond += (double) output[(size_t) i] * output[(size_t) i];
+
+            firstSecond = std::sqrt (firstSecond / 48000.0);
+            lastSecond = std::sqrt (lastSecond / 48000.0);
+
+            char msg[180];
+            std::snprintf (msg, sizeof (msg),
+                           "sustained 110 Hz ratio %.3f: first %.4f, last %.4f RMS",
+                           ratio, firstSecond, lastSecond);
+            check (lastSecond > firstSecond * 0.7, msg);
+        }
+    }
+
     void testStreamingDetector()
     {
         const double sr = 48000.0;
@@ -262,9 +339,11 @@ int main()
 {
     std::printf ("Auto-Tune DSP self-tests\n========================\n");
     testDetector();
+    testNoteNaming();
     testPitchStabilizer();
     testQuantizer();
     testShifter();
+    testSustainedShifter();
     testStreamingDetector();
     std::printf ("========================\n%s (%d failure%s)\n",
                  failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED",

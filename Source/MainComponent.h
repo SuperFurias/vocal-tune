@@ -25,6 +25,20 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
 
 private:
+    struct TuneFileSettings
+    {
+        float strength = 0.62f;
+        float retuneMs = 35.0f;
+        float humanize = 0.22f;
+        int keyIndex = -1;
+        int scaleIndex = 0;
+        int transpose = 0;
+        float tuningA4 = 440.0f;
+        float gateDb = -55.0f;
+        float inputGainDb = 0.0f;
+        juce::String preset = "Natural";
+    };
+
     struct AppSettings
     {
         float strength = 0.62f;
@@ -41,6 +55,10 @@ private:
         bool bypass = false;
         int latencyMode = 1;
         juce::String preset = "Natural";
+        int keyboardLabelStyle = 0;
+        bool keyboardUseFlats = false;
+        bool showTarget = true;
+        TuneFileSettings tuneFile;
         int overlayPort = 39871;
         bool overlayKeyboard = true;
         bool overlayGrid = true;
@@ -109,7 +127,7 @@ private:
     RecordButton recordButton;
     juce::TextButton fileButton { "TUNE FILE" };
     juce::TextButton obsButton { "OBS LINK" };
-    juce::TextButton setupButton { "SETUP" };
+    juce::TextButton setupButton { "SETTINGS" };
 
     juce::Label keyLabel;
     juce::Label scaleLabel;

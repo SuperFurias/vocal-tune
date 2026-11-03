@@ -69,7 +69,7 @@ namespace
 }
 
 AudioFilePanel::AudioFilePanel (InitialSettings settingsToUse)
-    : liveSettings (settingsToUse),
+    : initialSettings (settingsToUse),
       prewarmPreviewAudio (settingsToUse.prewarmPreviewAudio)
 {
     setOpaque (true);
@@ -245,11 +245,11 @@ AudioFilePanel::AudioFilePanel (InitialSettings settingsToUse)
     browseOutputButton.onClick = [this] { chooseOutputFile(); };
     addAndMakeVisible (browseOutputButton);
 
-    matchLiveButton.setColour (juce::TextButton::buttonColourId, Theme::panelRaised);
-    matchLiveButton.setColour (juce::TextButton::textColourOffId, Theme::textDim);
-    matchLiveButton.setTooltip ("Reset these export controls to the values currently used live.");
-    matchLiveButton.onClick = [this] { resetToLiveSettings(); };
-    addAndMakeVisible (matchLiveButton);
+    resetButton.setColour (juce::TextButton::buttonColourId, Theme::panelRaised);
+    resetButton.setColour (juce::TextButton::textColourOffId, Theme::textDim);
+    resetButton.setTooltip ("Reset the tune-file settings to their own defaults.");
+    resetButton.onClick = [this] { resetToDefaults(); };
+    addAndMakeVisible (resetButton);
 
     closeButton.setColour (juce::TextButton::buttonColourId, Theme::panelRaised);
     closeButton.setColour (juce::TextButton::textColourOffId, Theme::text);
@@ -273,7 +273,7 @@ AudioFilePanel::AudioFilePanel (InitialSettings settingsToUse)
     };
     addAndMakeVisible (exportButton);
 
-    resetToLiveSettings();
+    applySettings (initialSettings);
     notifyPreviewSettings();
     previewPlayer.setTuned (previewTuned);
     updatePreviewButtons();
@@ -414,7 +414,7 @@ void AudioFilePanel::paint (juce::Graphics& g)
 
     g.setColour (Theme::textFaint);
     g.setFont (Theme::font (8.5f));
-    g.drawText ("These settings affect this export only.",
+    g.drawText ("Used for preview and export; independent of the live panel.",
                 settingsHeadingArea.getX(), settingsHeadingArea.getY() + 5,
                 settingsHeadingArea.getWidth(), settingsHeadingArea.getHeight() - 5,
                 juce::Justification::centredRight, false);
@@ -526,7 +526,7 @@ void AudioFilePanel::resized()
     transposeLabel.setBounds (transposeBlock.removeFromTop (12));
     transposeBlock.removeFromTop (2);
     transposeSlider.setBounds (transposeBlock.withHeight (28));
-    matchLiveButton.setBounds (matchBlock.withTrimmedTop (16).withHeight (28));
+    resetButton.setBounds (matchBlock.withTrimmedTop (16).withHeight (28));
 
     auto layoutSlider = [] (juce::Rectangle<int> block, juce::Label& label, juce::Slider& slider)
     {
@@ -851,28 +851,29 @@ void AudioFilePanel::loadFile (const juce::File& file)
     repaint();
 }
 
-void AudioFilePanel::resetToLiveSettings()
+void AudioFilePanel::applySettings (const InitialSettings& settingsToApply)
 {
+    initialSettings = settingsToApply;
     suppressPresetChange = true;
 
-    keyCombo.setSelectedId (liveSettings.keyIndex < 0 ? 1 : liveSettings.keyIndex + 2,
+    keyCombo.setSelectedId (settingsToApply.keyIndex < 0 ? 1 : settingsToApply.keyIndex + 2,
                             juce::dontSendNotification);
 
     const auto& scales = autotune::getScales();
-    scaleCombo.setSelectedId (juce::jlimit (0, (int) scales.size() - 1, liveSettings.scaleIndex) + 1,
+    scaleCombo.setSelectedId (juce::jlimit (0, (int) scales.size() - 1, settingsToApply.scaleIndex) + 1,
                               juce::dontSendNotification);
 
-    correctionSlider.setValue (liveSettings.strength * 100.0, juce::dontSendNotification);
-    retuneSlider.setValue (liveSettings.retuneMs, juce::dontSendNotification);
-    humanizeSlider.setValue (liveSettings.humanize * 100.0, juce::dontSendNotification);
-    transposeSlider.setValue (liveSettings.transpose, juce::dontSendNotification);
-    tuningSlider.setValue (liveSettings.tuningA4, juce::dontSendNotification);
-    inputGainSlider.setValue (liveSettings.inputGainDb, juce::dontSendNotification);
+    correctionSlider.setValue (settingsToApply.strength * 100.0, juce::dontSendNotification);
+    retuneSlider.setValue (settingsToApply.retuneMs, juce::dontSendNotification);
+    humanizeSlider.setValue (settingsToApply.humanize * 100.0, juce::dontSendNotification);
+    transposeSlider.setValue (settingsToApply.transpose, juce::dontSendNotification);
+    tuningSlider.setValue (settingsToApply.tuningA4, juce::dontSendNotification);
+    inputGainSlider.setValue (settingsToApply.inputGainDb, juce::dontSendNotification);
 
     int presetId = (int) (sizeof (panelPresets) / sizeof (panelPresets[0])) + 1;
 
     for (int i = 0; i < (int) (sizeof (panelPresets) / sizeof (panelPresets[0])); ++i)
-        if (liveSettings.presetName.equalsIgnoreCase (panelPresets[i].name))
+        if (settingsToApply.presetName.equalsIgnoreCase (panelPresets[i].name))
             presetId = i + 1;
 
     presetCombo.setSelectedId (presetId, juce::dontSendNotification);
@@ -881,9 +882,34 @@ void AudioFilePanel::resetToLiveSettings()
     updateKeyScaleState();
     updateControls();
     notifyPreviewSettings();
+}
+
+void AudioFilePanel::resetToDefaults()
+{
+    applySettings (InitialSettings{});
 
     if (inputFile.existsAsFile())
-        setStatus ("Settings reset to the live values.");
+        setStatus ("Settings reset to the tune-file defaults.");
+}
+
+AudioFilePanel::InitialSettings AudioFilePanel::getCurrentSettings() const
+{
+    InitialSettings current = initialSettings;
+    current.strength = (float) (correctionSlider.getValue() / 100.0);
+    current.retuneMs = (float) retuneSlider.getValue();
+    current.humanize = (float) (humanizeSlider.getValue() / 100.0);
+    current.transpose = (int) std::lround (transposeSlider.getValue());
+    current.tuningA4 = (float) tuningSlider.getValue();
+    current.inputGainDb = (float) inputGainSlider.getValue();
+
+    const int keyId = keyCombo.getSelectedId();
+    current.keyIndex = keyId <= 1 ? -1 : keyId - 2;
+
+    const auto& scales = autotune::getScales();
+    current.scaleIndex = juce::jlimit (0, (int) scales.size() - 1,
+                                       scaleCombo.getSelectedId() - 1);
+    current.presetName = presetCombo.getText();
+    return current;
 }
 
 void AudioFilePanel::applyPresetSelection()
@@ -996,7 +1022,7 @@ void AudioFilePanel::updateControls()
     chooseButton.setEnabled (canEdit);
     chooseButton.setButtonText (hasFile ? "CHANGE AUDIO" : "CHOOSE AUDIO");
     browseOutputButton.setEnabled (canEdit && hasFile);
-    matchLiveButton.setEnabled (canEdit);
+    resetButton.setEnabled (canEdit);
     exportButton.setEnabled (exporting || (hasFile && outputFile != juce::File{}));
     closeButton.setEnabled (true);
 
@@ -1128,7 +1154,7 @@ OfflineRenderer::Settings AudioFilePanel::makeExportSettings() const
     settings.transpose = (int) std::lround (transposeSlider.getValue());
     settings.tuningA4 = (float) tuningSlider.getValue();
     settings.inputGainDb = (float) inputGainSlider.getValue();
-    settings.gateDb = liveSettings.gateDb;
+    settings.gateDb = initialSettings.gateDb;
 
     const int keyId = keyCombo.getSelectedId();
 

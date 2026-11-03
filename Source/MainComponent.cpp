@@ -57,14 +57,36 @@ namespace
         bool closing = false;
     };
 
+    PitchView::NoteLabelStyle keyboardLabelStyleFromIndex (int index)
+    {
+        switch (juce::jlimit (0, 5, index))
+        {
+            case 1: return PitchView::NoteLabelStyle::scientific;
+            case 2: return PitchView::NoteLabelStyle::helmholtz;
+            case 3: return PitchView::NoteLabelStyle::solfege;
+            case 4: return PitchView::NoteLabelStyle::midi;
+            case 5: return PitchView::NoteLabelStyle::singer;
+            default: return PitchView::NoteLabelStyle::namesWithCOctaves;
+        }
+    }
+
     class SettingsPanel final : public juce::Component
     {
     public:
-        explicit SettingsPanel (AudioEngine& engineToUse)
+        SettingsPanel (AudioEngine& engineToUse,
+                       int keyboardLabelStyle,
+                       bool showTarget,
+                       bool useFlats,
+                       std::function<void (int)> onKeyboardLabelStyleChanged,
+                       std::function<void (bool)> onShowTargetChanged,
+                       std::function<void (bool)> onUseFlatsChanged)
             : engine (engineToUse),
-              selector (engineToUse.getDeviceManager(), 0, 2, 0, 2, false, false, true, false)
+              selector (engineToUse.getDeviceManager(), 0, 2, 0, 2, false, false, true, false),
+              labelStyleCallback (std::move (onKeyboardLabelStyleChanged)),
+              showTargetCallback (std::move (onShowTargetChanged)),
+              flatsCallback (std::move (onUseFlatsChanged))
         {
-            setSize (700, 700);
+            setSize (700, 740);
 
             viewport.setViewedComponent (&selector, false);
             viewport.setScrollBarsShown (true, false);
@@ -99,9 +121,45 @@ namespace
             };
             addAndMakeVisible (gateSlider);
 
+            labelStyleCombo.addItem ("Note names (C octaves)", 1);
+            labelStyleCombo.addItem ("Scientific (E2, F2...)", 2);
+            labelStyleCombo.addItem ("Helmholtz (c')", 3);
+            labelStyleCombo.addItem ("Solfège (Do, Re, Mi)", 4);
+            labelStyleCombo.addItem ("MIDI numbers (60)", 5);
+            labelStyleCombo.addItem ("Singer (tenor high C)", 6);
+            labelStyleCombo.setSelectedId (juce::jlimit (0, 5, keyboardLabelStyle) + 1,
+                                          juce::dontSendNotification);
+            labelStyleCombo.setTooltip ("Choose how the piano keys are labelled.");
+            labelStyleCombo.onChange = [this]
+            {
+                if (labelStyleCallback)
+                    labelStyleCallback (labelStyleCombo.getSelectedId() - 1);
+            };
+            addAndMakeVisible (labelStyleCombo);
+
+            flatsToggle.setOn (useFlats);
+            flatsToggle.setTooltip ("Show black keys as flats (B♭) instead of sharps (A♯).");
+            flatsToggle.onToggle = [this] (bool on)
+            {
+                if (flatsCallback)
+                    flatsCallback (on);
+            };
+            addAndMakeVisible (flatsToggle);
+
+            showTargetToggle.setOn (showTarget);
+            showTargetToggle.setTooltip ("Show the quantised target guide on the pitch display.");
+            showTargetToggle.onToggle = [this] (bool on)
+            {
+                if (showTargetCallback)
+                    showTargetCallback (on);
+            };
+            addAndMakeVisible (showTargetToggle);
+
             hint.setText ("For the lowest latency choose Windows Audio (Low Latency Mode), or Exclusive "
                           "Mode if nothing else needs the device, then pick the smallest buffer that runs "
-                          "without crackles.",
+                          "without crackles. If your mic fades or pops after a few seconds, disable "
+                          "Windows microphone AGC/enhancements and set the Communications sound setting "
+                          "to Do nothing.",
                           juce::dontSendNotification);
             hint.setFont (Theme::font (10.0f));
             hint.setColour (juce::Label::textColourId, Theme::textDim);
@@ -132,22 +190,26 @@ namespace
 
             g.setColour (Theme::text);
             g.setFont (Theme::display (19.0f));
-            g.drawText ("AUDIO SETUP", 24, 18, getWidth() - 48, 26,
+            g.drawText ("SETTINGS", 24, 18, getWidth() - 48, 26,
                         juce::Justification::centredLeft, false);
 
             g.setColour (Theme::textDim);
             g.setFont (Theme::font (10.0f));
-            g.drawText ("Device, buffer and voice engine", 24, 43, getWidth() - 48, 16,
+            g.drawText ("Audio, display and voice engine", 24, 43, getWidth() - 48, 16,
                         juce::Justification::centredLeft, false);
 
             drawSectionHeading (g, deviceLabelBounds, "DEVICE");
             drawSectionHeading (g, engineLabelBounds, "VOICE ENGINE");
+            drawSectionHeading (g, displayLabelBounds, "DISPLAY");
 
             g.setFont (Theme::font (8.5f, true));
             g.setColour (Theme::textDim);
             g.drawText ("PITCH ENGINE", latencyLabelBounds, juce::Justification::centredLeft, false);
             g.drawText ("TUNING (A4)", a4LabelBounds, juce::Justification::centredLeft, false);
             g.drawText ("NOISE GATE", gateLabelBounds, juce::Justification::centredLeft, false);
+            g.drawText ("KEYBOARD LABELS", labelStyleLabelBounds, juce::Justification::centredLeft, false);
+            g.drawText ("BLACK KEYS", flatsLabelBounds, juce::Justification::centredLeft, false);
+            g.drawText ("TARGET GUIDE", showTargetLabelBounds, juce::Justification::centredLeft, false);
 
             g.setColour (Theme::strokeSoft);
             g.fillRect (24, doneButton.getY() - 16, getWidth() - 48, 1);
@@ -161,30 +223,49 @@ namespace
             deviceLabelBounds = area.removeFromTop (20);
             area.removeFromTop (2);
 
-            viewport.setBounds (area.removeFromTop (392));
+            viewport.setBounds (area.removeFromTop (300));
             selector.setBounds (0, 0, juce::jmax (200, viewport.getWidth() - 12), 620);
             area.removeFromTop (14);
 
             engineLabelBounds = area.removeFromTop (20);
             area.removeFromTop (4);
 
-            auto row = area.removeFromTop (52);
-            auto pitchArea = row.removeFromLeft (190);
+            auto engineRow = area.removeFromTop (52);
+            auto pitchArea = engineRow.removeFromLeft (190);
             latencyLabelBounds = pitchArea.removeFromTop (14);
             latencyCombo.setBounds (pitchArea.withHeight (30));
 
-            row.removeFromLeft (18);
-            auto a4Area = row.removeFromLeft (210);
+            engineRow.removeFromLeft (18);
+            auto a4Area = engineRow.removeFromLeft (210);
             a4LabelBounds = a4Area.removeFromTop (14);
             a4Slider.setBounds (a4Area.withHeight (30));
 
-            row.removeFromLeft (18);
-            auto gateArea = row;
+            engineRow.removeFromLeft (18);
+            auto gateArea = engineRow;
             gateLabelBounds = gateArea.removeFromTop (14);
             gateSlider.setBounds (gateArea.withHeight (30));
 
             area.removeFromTop (10);
-            hint.setBounds (area.removeFromTop (40));
+            hint.setBounds (area.removeFromTop (58));
+
+            area.removeFromTop (8);
+            displayLabelBounds = area.removeFromTop (20);
+            area.removeFromTop (4);
+
+            auto displayRow = area.removeFromTop (52);
+            auto labelStyleArea = displayRow.removeFromLeft (300);
+            labelStyleLabelBounds = labelStyleArea.removeFromTop (14);
+            labelStyleCombo.setBounds (labelStyleArea.withHeight (30));
+
+            displayRow.removeFromLeft (14);
+            auto flatsArea = displayRow.removeFromLeft (150);
+            flatsLabelBounds = flatsArea.removeFromTop (14);
+            flatsToggle.setBounds (flatsArea.withHeight (30));
+
+            displayRow.removeFromLeft (14);
+            auto targetArea = displayRow;
+            showTargetLabelBounds = targetArea.removeFromTop (14);
+            showTargetToggle.setBounds (targetArea.withHeight (30));
 
             doneButton.setBounds (getWidth() - 24 - 120, getHeight() - 24 - 34, 120, 34);
         }
@@ -224,13 +305,23 @@ namespace
         juce::ComboBox latencyCombo;
         juce::Slider a4Slider;
         juce::Slider gateSlider;
+        juce::ComboBox labelStyleCombo;
+        PillToggle flatsToggle { "FLATS" };
+        PillToggle showTargetToggle { "SHOW" };
         juce::Label hint;
         juce::TextButton doneButton;
+        std::function<void (int)> labelStyleCallback;
+        std::function<void (bool)> showTargetCallback;
+        std::function<void (bool)> flatsCallback;
         juce::Rectangle<int> deviceLabelBounds;
         juce::Rectangle<int> engineLabelBounds;
+        juce::Rectangle<int> displayLabelBounds;
         juce::Rectangle<int> latencyLabelBounds;
         juce::Rectangle<int> a4LabelBounds;
         juce::Rectangle<int> gateLabelBounds;
+        juce::Rectangle<int> labelStyleLabelBounds;
+        juce::Rectangle<int> flatsLabelBounds;
+        juce::Rectangle<int> showTargetLabelBounds;
     };
 
     class ObsPanel final : public juce::Component,
@@ -492,7 +583,6 @@ MainComponent::MainComponent()
         overlayStateDirty = true;
     }
 
-    pitchView.setShowTarget (true);
     updateStatusTexts (engine.getSnapshot());
     setSize (1280, 860);
     startTimerHz (60);
@@ -776,7 +866,7 @@ void MainComponent::setupControls()
 
     setupButton.setColour (juce::TextButton::buttonColourId, Theme::panelRaised);
     setupButton.setColour (juce::TextButton::textColourOffId, Theme::text);
-    setupButton.setTooltip ("Audio devices, buffer size, tuning and gate. (F1)");
+    setupButton.setTooltip ("Audio devices, display options, tuning and gate. (F1)");
     setupButton.onClick = [this] { showSettingsDialog(); };
     addAndMakeVisible (setupButton);
 }
@@ -814,6 +904,10 @@ void MainComponent::applySettingsToControls()
 
     monitorToggle.setOn (settings.monitor);
     bypassToggle.setOn (settings.bypass);
+
+    pitchView.setNoteLabelStyle (keyboardLabelStyleFromIndex (settings.keyboardLabelStyle));
+    pitchView.setUseFlats (settings.keyboardUseFlats);
+    pitchView.setShowTarget (settings.showTarget);
 
     selectPresetItem (settings.preset);
 
@@ -924,9 +1018,26 @@ void MainComponent::showSettingsDialog()
 
     settingsDialog.reset();
 
-    auto content = std::make_unique<SettingsPanel> (engine);
+    auto content = std::make_unique<SettingsPanel> (
+        engine, settings.keyboardLabelStyle, settings.showTarget, settings.keyboardUseFlats,
+        [this] (int style)
+        {
+            settings.keyboardLabelStyle = juce::jlimit (0, 5, style);
+            pitchView.setNoteLabelStyle (keyboardLabelStyleFromIndex (settings.keyboardLabelStyle));
+        },
+        [this] (bool shouldShow)
+        {
+            settings.showTarget = shouldShow;
+            pitchView.setShowTarget (settings.showTarget);
+        },
+        [this] (bool useFlats)
+        {
+            settings.keyboardUseFlats = useFlats;
+            pitchView.setUseFlats (settings.keyboardUseFlats);
+        });
+
     auto dialog = std::make_unique<ToolDialogWindow> (
-        "Audio Setup", std::move (content),
+        "Settings", std::move (content),
         [this]
         {
             settings.tuningA4 = engine.params.tuningA4.load();
@@ -976,21 +1087,39 @@ void MainComponent::showAudioFileDialog()
 
     audioFileDialog.reset();
 
+    const auto& tuneFile = settings.tuneFile;
+
     AudioFilePanel::InitialSettings initial;
-    initial.strength = engine.params.strength.load();
-    initial.retuneMs = engine.params.retuneMs.load();
-    initial.humanize = engine.params.humanize.load();
-    initial.keyIndex = settings.keyIndex;
-    initial.scaleIndex = settings.scaleIndex;
-    initial.transpose = engine.params.transpose.load();
-    initial.tuningA4 = engine.params.tuningA4.load();
-    initial.gateDb = engine.params.gateDb.load();
-    initial.inputGainDb = engine.params.inputGainDb.load();
-    initial.presetName = settings.preset;
+    initial.strength = tuneFile.strength;
+    initial.retuneMs = tuneFile.retuneMs;
+    initial.humanize = tuneFile.humanize;
+    initial.keyIndex = tuneFile.keyIndex;
+    initial.scaleIndex = tuneFile.scaleIndex;
+    initial.transpose = tuneFile.transpose;
+    initial.tuningA4 = tuneFile.tuningA4;
+    initial.gateDb = tuneFile.gateDb;
+    initial.inputGainDb = tuneFile.inputGainDb;
+    initial.presetName = tuneFile.preset;
 
     auto content = std::make_unique<AudioFilePanel> (initial);
+    auto* panel = content.get();
     auto dialog = std::make_unique<ToolDialogWindow> (
-        "Tune Audio File", std::move (content), [] {});
+        "Tune Audio File", std::move (content),
+        [this, panel]
+        {
+            const auto current = panel->getCurrentSettings();
+            settings.tuneFile.strength = current.strength;
+            settings.tuneFile.retuneMs = current.retuneMs;
+            settings.tuneFile.humanize = current.humanize;
+            settings.tuneFile.keyIndex = current.keyIndex;
+            settings.tuneFile.scaleIndex = current.scaleIndex;
+            settings.tuneFile.transpose = current.transpose;
+            settings.tuneFile.tuningA4 = current.tuningA4;
+            settings.tuneFile.gateDb = current.gateDb;
+            settings.tuneFile.inputGainDb = current.inputGainDb;
+            settings.tuneFile.preset = current.presetName;
+            saveSettings();
+        });
     dialog->showModal (this);
     audioFileDialog = std::move (dialog);
 }
@@ -1241,6 +1370,54 @@ void MainComponent::loadSettings()
     settings.bypass = readBool ("bypass", settings.bypass);
     settings.latencyMode = juce::jlimit (0, 2, (int) readNumber ("latencyMode", settings.latencyMode));
     settings.preset = readString ("preset", settings.preset);
+    const int labelStyleVersion = (int) readNumber ("labelStyleVersion", 0);
+    int savedLabelStyle = (int) readNumber ("keyboardLabelStyle", settings.keyboardLabelStyle);
+    if (labelStyleVersion < 2)
+        savedLabelStyle = savedLabelStyle >= 2 ? 1 : 0;
+
+    settings.keyboardLabelStyle = juce::jlimit (0, 5, savedLabelStyle);
+    settings.keyboardUseFlats = readBool ("keyboardUseFlats", settings.keyboardUseFlats);
+    settings.showTarget = readBool ("showTarget", settings.showTarget);
+
+    if (auto* tuneFile = object->getProperty ("tuneFile").getDynamicObject())
+    {
+        auto readTuneNumber = [tuneFile] (const char* name, double fallback)
+        {
+            const auto value = tuneFile->getProperty (name);
+            return (value.isInt() || value.isInt64() || value.isDouble()) ? (double) value : fallback;
+        };
+
+        auto readTuneString = [tuneFile] (const char* name, const juce::String& fallback)
+        {
+            const auto value = tuneFile->getProperty (name);
+            return value.isString() ? value.toString() : fallback;
+        };
+
+        settings.tuneFile.strength = juce::jlimit (0.0f, 1.0f,
+                                                   (float) readTuneNumber ("strength", settings.tuneFile.strength));
+        settings.tuneFile.retuneMs = juce::jlimit (0.0f, 250.0f,
+                                                   (float) readTuneNumber ("retuneMs", settings.tuneFile.retuneMs));
+        settings.tuneFile.humanize = juce::jlimit (0.0f, 1.0f,
+                                                   (float) readTuneNumber ("humanize", settings.tuneFile.humanize));
+        settings.tuneFile.keyIndex = juce::jlimit (-1, 11,
+                                                   (int) readTuneNumber ("keyIndex", settings.tuneFile.keyIndex));
+        settings.tuneFile.scaleIndex = juce::jlimit (0, (int) autotune::getScales().size() - 1,
+                                                     (int) readTuneNumber ("scaleIndex",
+                                                                           settings.tuneFile.scaleIndex));
+        settings.tuneFile.transpose = juce::jlimit (-24, 24,
+                                                    (int) readTuneNumber ("transpose",
+                                                                          settings.tuneFile.transpose));
+        settings.tuneFile.tuningA4 = juce::jlimit (415.0f, 466.0f,
+                                                   (float) readTuneNumber ("tuningA4",
+                                                                           settings.tuneFile.tuningA4));
+        settings.tuneFile.gateDb = juce::jlimit (-80.0f, -20.0f,
+                                                 (float) readTuneNumber ("gateDb", settings.tuneFile.gateDb));
+        settings.tuneFile.inputGainDb = juce::jlimit (-24.0f, 24.0f,
+                                                      (float) readTuneNumber ("inputGainDb",
+                                                                              settings.tuneFile.inputGainDb));
+        settings.tuneFile.preset = readTuneString ("preset", settings.tuneFile.preset);
+    }
+
     settings.overlayPort = juce::jlimit (1024, 65535, (int) readNumber ("overlayPort", settings.overlayPort));
     settings.overlayKeyboard = readBool ("overlayKeyboard", settings.overlayKeyboard);
     settings.overlayGrid = readBool ("overlayGrid", settings.overlayGrid);
@@ -1284,6 +1461,24 @@ void MainComponent::saveSettings()
     object->setProperty ("bypass", settings.bypass);
     object->setProperty ("latencyMode", settings.latencyMode);
     object->setProperty ("preset", settings.preset);
+    object->setProperty ("keyboardLabelStyle", settings.keyboardLabelStyle);
+    object->setProperty ("labelStyleVersion", 2);
+    object->setProperty ("keyboardUseFlats", settings.keyboardUseFlats);
+    object->setProperty ("showTarget", settings.showTarget);
+
+    auto* tuneFile = new juce::DynamicObject();
+    tuneFile->setProperty ("strength", settings.tuneFile.strength);
+    tuneFile->setProperty ("retuneMs", settings.tuneFile.retuneMs);
+    tuneFile->setProperty ("humanize", settings.tuneFile.humanize);
+    tuneFile->setProperty ("keyIndex", settings.tuneFile.keyIndex);
+    tuneFile->setProperty ("scaleIndex", settings.tuneFile.scaleIndex);
+    tuneFile->setProperty ("transpose", settings.tuneFile.transpose);
+    tuneFile->setProperty ("tuningA4", settings.tuneFile.tuningA4);
+    tuneFile->setProperty ("gateDb", settings.tuneFile.gateDb);
+    tuneFile->setProperty ("inputGainDb", settings.tuneFile.inputGainDb);
+    tuneFile->setProperty ("preset", settings.tuneFile.preset);
+    object->setProperty ("tuneFile", juce::var (tuneFile));
+
     object->setProperty ("overlayPort", settings.overlayPort);
     object->setProperty ("overlayKeyboard", settings.overlayKeyboard);
     object->setProperty ("overlayGrid", settings.overlayGrid);
